@@ -29,5 +29,5 @@ file (Python, esptool and the UI are all bundled).
 
 ## How it stays compatible with the firmware
 
-The flasher does **not** hardcode flash offsets. It pulls automatically from the 
+The flasher does **not** hardcode flash offsets. It pulls automatically from 
 [FPVRaceOne Releases](https://github.com/ramiss/FPVRaceOne/releases)
