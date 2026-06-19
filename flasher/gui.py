@@ -14,8 +14,8 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QComboBox, QCheckBox, QFileDialog, QGroupBox,
-    QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QProgressBar, QPushButton,
-    QRadioButton, QStackedWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit,
+    QProgressBar, QPushButton, QRadioButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from . import config, engine
@@ -37,11 +37,28 @@ class Worker(QThread):
     def run(self):
         try:
             self._job(self.log.emit, self.progress.emit)
-            self.done.emit(True, "Flash complete — device is rebooting.")
+            self.done.emit(True, "Flash complete — device(s) rebooting.")
         except FlashError as e:
             self.done.emit(False, str(e))
         except Exception as e:  # last-resort guard so the thread never dies silently
             self.done.emit(False, f"Unexpected error: {e}")
+
+
+class ReleaseLoader(QThread):
+    """Fetches the GitHub release list off the UI thread so the window can show
+    immediately and stay responsive while GitHub is queried."""
+    loaded = Signal(list)   # list[dict] of release dicts, newest first
+    failed = Signal(str)
+
+    def __init__(self, include_prereleases: bool):
+        super().__init__()
+        self._include_prereleases = include_prereleases
+
+    def run(self):
+        try:
+            self.loaded.emit(engine.list_releases(include_prereleases=self._include_prereleases))
+        except FlashError as e:
+            self.failed.emit(str(e))
 
 
 class MainWindow(QWidget):
@@ -54,20 +71,39 @@ class MainWindow(QWidget):
             self.setWindowIcon(QIcon(str(icon)))
         self._releases: list[dict] = []
         self._worker: Worker | None = None
+        self._rel_loader: ReleaseLoader | None = None
         self._build_ui()
         self.refresh_ports()
+        self.refresh_releases()   # populate the version dropdown on startup
 
     # ── UI construction ─────────────────────────────────────────────────────
     def _build_ui(self):
         outer = QHBoxLayout(self)
 
-        # Left: product banner image.
+        # Left column: product banner image, with developer credit + Etsy link
+        # stacked beneath it.
+        left = QVBoxLayout()
         banner_pix = QPixmap(str(asset_path("product.png")))
         if not banner_pix.isNull():
             banner = QLabel()
             banner.setPixmap(banner_pix.scaledToHeight(400, Qt.SmoothTransformation))
-            banner.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
-            outer.addWidget(banner, 0, Qt.AlignTop)
+            banner.setAlignment(Qt.AlignHCenter)
+            left.addWidget(banner)
+
+        credit = QLabel(f"Developed by {config.DEVELOPER}")
+        credit.setAlignment(Qt.AlignHCenter)
+        left.addWidget(credit)
+
+        if config.ETSY_URL:
+            etsy = QLabel(f'<a href="{config.ETSY_URL}">{config.ETSY_LINK_TEXT}</a>')
+            etsy.setOpenExternalLinks(True)   # opens in the system browser
+        else:
+            etsy = QLabel("<i>Etsy listing — link coming soon</i>")
+        etsy.setAlignment(Qt.AlignHCenter)
+        left.addWidget(etsy)
+
+        left.addStretch()
+        outer.addLayout(left, 0)
 
         # Right: all controls.
         root = QVBoxLayout()
@@ -78,7 +114,7 @@ class MainWindow(QWidget):
         # Source: GitHub vs local files
         src_box = QGroupBox("Firmware source")
         src_lay = QHBoxLayout(src_box)
-        self.rb_github = QRadioButton("Download from GitHub release")
+        self.rb_github = QRadioButton("Download from GitHub")
         self.rb_local = QRadioButton("Use local files")
         self.rb_github.setChecked(True)
         src_grp = QButtonGroup(self)
@@ -111,16 +147,19 @@ class MainWindow(QWidget):
         self.rb_update.toggled.connect(self._sync_local_rows)
         self.rb_recovery.toggled.connect(self._sync_local_rows)
 
-        # Port
-        port_box = QGroupBox("Device")
-        port_lay = QHBoxLayout(port_box)
-        port_lay.addWidget(QLabel("Port:"))
-        self.port_combo = QComboBox()
-        self.port_combo.setMinimumWidth(280)
+        # Devices: only ESP32 ports are listed; check one or more to flash them all.
+        port_box = QGroupBox("Devices (ESP32)")
+        port_lay = QVBoxLayout(port_box)
+        head = QHBoxLayout()
+        head.addWidget(QLabel("Check each device to flash:"))
+        head.addStretch()
         btn_ports = QPushButton("Refresh")
         btn_ports.clicked.connect(self.refresh_ports)
-        port_lay.addWidget(self.port_combo, 1)
-        port_lay.addWidget(btn_ports)
+        head.addWidget(btn_ports)
+        port_lay.addLayout(head)
+        self.port_list = QListWidget()
+        self.port_list.setMaximumHeight(120)
+        port_lay.addWidget(self.port_list)
         root.addWidget(port_box)
 
         # Flash button
@@ -145,18 +184,18 @@ class MainWindow(QWidget):
     def _build_github_panel(self) -> QWidget:
         w = QWidget()
         lay = QVBoxLayout(w)
-        top = QHBoxLayout()
-        self.btn_refresh_rel = QPushButton("Load releases")
-        self.btn_refresh_rel.clicked.connect(self.refresh_releases)
-        self.cb_prerelease = QCheckBox("Include pre-releases (beta)")
-        top.addWidget(self.btn_refresh_rel)
-        top.addWidget(self.cb_prerelease)
-        top.addStretch()
-        lay.addLayout(top)
-        self.cb_prerelease.toggled.connect(self.refresh_releases)
+        lay.addWidget(QLabel("Version:"))
+        row = QHBoxLayout()
         self.release_combo = QComboBox()
         self.release_combo.setMinimumWidth(420)
-        lay.addWidget(self.release_combo)
+        self.btn_refresh_rel = QPushButton("Refresh")
+        self.btn_refresh_rel.clicked.connect(self.refresh_releases)
+        row.addWidget(self.release_combo, 1)
+        row.addWidget(self.btn_refresh_rel)
+        lay.addLayout(row)
+        self.cb_prerelease = QCheckBox("Include pre-releases (beta)")
+        self.cb_prerelease.toggled.connect(self.refresh_releases)
+        lay.addWidget(self.cb_prerelease)
         return w
 
     def _build_local_panel(self) -> QWidget:
@@ -200,36 +239,69 @@ class MainWindow(QWidget):
 
     # ── Data refresh ──────────────────────────────────────────────────────────
     def refresh_ports(self):
-        self.port_combo.clear()
-        ports = engine.list_ports()
+        self.port_list.clear()
+        # Only ESP32-like ports (matched by USB vendor id) are offered.
+        ports = [p for p in engine.list_ports() if p[2]]
         if not ports:
-            self.port_combo.addItem("(no serial ports found)", userData=None)
+            item = QListWidgetItem("(no ESP32 devices found — plug one in and click Refresh)")
+            item.setFlags(Qt.NoItemFlags)
+            self.port_list.addItem(item)
             return
-        for device, desc, likely in ports:
-            mark = "  ●" if likely else ""
-            self.port_combo.addItem(f"{device} — {desc}{mark}", userData=device)
+        for device, desc, _likely in ports:
+            item = QListWidgetItem(f"{device} — {desc}")
+            item.setData(Qt.UserRole, device)
+            item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            item.setCheckState(Qt.Checked)   # default: flash every device found
+            self.port_list.addItem(item)
+
+    def selected_ports(self) -> list[str]:
+        """Devices the user has checked, in list order."""
+        out = []
+        for i in range(self.port_list.count()):
+            item = self.port_list.item(i)
+            if (item.flags() & Qt.ItemIsUserCheckable) and item.checkState() == Qt.Checked:
+                device = item.data(Qt.UserRole)
+                if device:
+                    out.append(device)
+        return out
 
     def refresh_releases(self):
+        if self._rel_loader and self._rel_loader.isRunning():
+            return
         self.btn_refresh_rel.setEnabled(False)
-        self.log("Querying GitHub for releases…")
-        try:
-            self._releases = engine.list_releases(include_prereleases=self.cb_prerelease.isChecked())
-        except FlashError as e:
-            self.log(f"[ERROR] {e}")
-            self._releases = []
-        finally:
-            self.btn_refresh_rel.setEnabled(True)
-
         self.release_combo.clear()
-        if not self._releases:
+        self.release_combo.addItem("Loading versions…", userData=-1)
+        self.log("Querying GitHub for releases…")
+        self._rel_loader = ReleaseLoader(self.cb_prerelease.isChecked())
+        self._rel_loader.loaded.connect(self._on_releases_loaded)
+        self._rel_loader.failed.connect(self._on_releases_failed)
+        self._rel_loader.start()
+
+    def _on_releases_loaded(self, releases: list):
+        self._releases = releases
+        self.btn_refresh_rel.setEnabled(True)
+        self.release_combo.clear()
+        if not releases:
             self.release_combo.addItem("(no releases found)", userData=-1)
             return
-        for i, r in enumerate(self._releases):
+        # Releases come newest-first, so index 0 is the latest.
+        for i, r in enumerate(releases):
             tag = r.get("tag_name", "?")
-            when = (r.get("published_at") or "")[:10]
-            pre = " [pre-release]" if r.get("prerelease") else ""
-            self.release_combo.addItem(f"{tag}{pre}   ({when})", userData=i)
-        self.log(f"Found {len(self._releases)} release(s).")
+            label = f"{config.PRODUCT} {tag}"
+            if i == 0:
+                label += " (latest)"
+            if r.get("prerelease"):
+                label += " — beta"
+            self.release_combo.addItem(label, userData=i)
+        self.release_combo.setCurrentIndex(0)   # default to the latest
+        self.log(f"Found {len(releases)} release(s).")
+
+    def _on_releases_failed(self, message: str):
+        self._releases = []
+        self.btn_refresh_rel.setEnabled(True)
+        self.release_combo.clear()
+        self.release_combo.addItem("(could not load releases)", userData=-1)
+        self.log(f"[ERROR] {message}")
 
     # ── Logging / progress slots ────────────────────────────────────────────
     def log(self, text: str):
@@ -248,21 +320,21 @@ class MainWindow(QWidget):
     def start_flash(self):
         if self._worker and self._worker.isRunning():
             return
-        port = self.port_combo.currentData()
-        if not port:
-            self.log("[ERROR] No serial port selected. Plug in the device and click Refresh.")
+        ports = self.selected_ports()
+        if not ports:
+            self.log("[ERROR] No ESP32 device selected. Plug one in, click Refresh, and check it.")
             return
         mode = "recovery" if self.rb_recovery.isChecked() else "update"
 
         try:
-            job = self._build_github_job(port, mode) if self.rb_github.isChecked() \
-                else self._build_local_job(port, mode)
+            job = self._build_github_job(ports, mode) if self.rb_github.isChecked() \
+                else self._build_local_job(ports, mode)
         except FlashError as e:
             self.log(f"[ERROR] {e}")
             return
 
         self.log_view.clear()
-        self.log(f"=== Flashing ({mode}) on {port} ===")
+        self.log(f"=== Flashing ({mode}) on {len(ports)} device(s): {', '.join(ports)} ===")
         self.btn_flash.setEnabled(False)
         self.set_progress(-1)
         self._worker = Worker(job)
@@ -277,7 +349,26 @@ class MainWindow(QWidget):
         self.log(("SUCCESS — " if ok else "FAILED — ") + message)
         self.btn_flash.setEnabled(True)
 
-    def _build_github_job(self, port: str, mode: str):
+    @staticmethod
+    def _flash_each(chip, baud, ports, pairs, log):
+        """Flash the same images to every selected port in turn. One device
+        failing doesn't abort the rest; failures are collected and reported."""
+        failures = []
+        for n, port in enumerate(ports, 1):
+            log("")
+            log(f"--- Device {n}/{len(ports)}: {port} ---")
+            try:
+                engine.flash(chip, baud, port, pairs, log_cb=log)
+                log(f"  {port}: done.")
+            except FlashError as e:
+                failures.append(port)
+                log(f"  [ERROR] {port}: {e}")
+        if failures:
+            raise FlashError(
+                f"{len(failures)} of {len(ports)} device(s) failed: {', '.join(failures)}"
+            )
+
+    def _build_github_job(self, ports: list[str], mode: str):
         idx = self.release_combo.currentData()
         if idx is None or idx < 0 or idx >= len(self._releases):
             raise FlashError("No release selected. Click 'Load releases' and choose one.")
@@ -309,11 +400,11 @@ class MainWindow(QWidget):
                     engine.download(assets[name], dest, progress_cb=progress, log_cb=log)
                 pairs.append((offset, dest))
             progress(-1)
-            engine.flash(manifest["chip"], int(manifest["baud"]), port, pairs, log_cb=log)
+            self._flash_each(manifest["chip"], int(manifest["baud"]), ports, pairs, log)
 
         return job
 
-    def _build_local_job(self, port: str, mode: str):
+    def _build_local_job(self, ports: list[str], mode: str):
         fb = config.FALLBACK_MANIFEST
         if mode == "recovery":
             rows = [(self.row_merged, fb["assets"].get("merged", {}).get("offset", "0x0")),
@@ -337,7 +428,7 @@ class MainWindow(QWidget):
 
         def job(log, progress):
             progress(-1)
-            engine.flash(chip, baud, port, pairs, log_cb=log)
+            self._flash_each(chip, baud, ports, pairs, log)
 
         return job
 

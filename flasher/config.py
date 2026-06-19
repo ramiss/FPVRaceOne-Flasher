@@ -12,6 +12,15 @@ GITHUB_REPO = "FPVRaceOne"
 
 PRODUCT = "FPVRaceOne"
 
+# Shown under the product banner in the GUI.
+DEVELOPER = "Richard Amiss"
+
+# Etsy shop / product link shown under the banner. Leave "" until the listing
+# URL is known — the GUI shows a "coming soon" placeholder while it's empty, and
+# renders a clickable link once it's filled in.
+ETSY_URL = ""            # e.g. "https://www.etsy.com/listing/1234567890/fpvraceone"
+ETSY_LINK_TEXT = "Buy on Etsy"
+
 # USB vendor IDs that indicate an attached ESP32 (mirrors the firmware repo's
 # scripts/extra_script.py).  Used to pre-select the right COM port.
 ESP32_VIDS = {

@@ -41,7 +41,7 @@
       "args": [
         "-NoProfile",
         "-ExecutionPolicy", "Bypass",
-        "-Command", "pip install -r requirements.txt pyinstaller; pyinstaller flasher.spec"
+        "-Command", "python -m pip install -r requirements.txt pyinstaller; python -m PyInstaller flasher.spec"
       ],
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "shared", "clear": true }
