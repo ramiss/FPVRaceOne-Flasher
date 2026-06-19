@@ -1,0 +1,7 @@
+PySide6>=6.6
+pyserial>=3.5
+esptool>=4.7,<5
+
+# Build-time only (not bundled). Needed solely to regenerate the committed
+# icon/GUI images via `python tools/make_assets.py`:
+#   Pillow>=10

@@ -1,0 +1,63 @@
+{
+  // VSCode Tasks for the FPVRaceOne Flasher.
+  // Run any task with:  Ctrl+Shift+P  ->  "Tasks: Run Task"
+  // "Deploy to GitHub" is the default build task:  Ctrl+Shift+B
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Deploy to GitHub",
+      "detail": "Commit all changes and push to main (CI builds the .exe).",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", "${workspaceFolder}/tools/deploy.ps1",
+        "${input:commitMessage}"
+      ],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Release (tag & publish .exe)",
+      "detail": "Tag a version and push it; CI publishes a GitHub Release with the .exe.",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", "${workspaceFolder}/tools/release.ps1",
+        "${input:version}"
+      ],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Build .exe locally",
+      "detail": "Run PyInstaller to produce dist/FPVRaceOne-Flasher.exe on this machine.",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-Command", "pip install -r requirements.txt pyinstaller; pyinstaller flasher.spec"
+      ],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "commitMessage",
+      "type": "promptString",
+      "description": "Commit message for this deploy",
+      "default": "Update FPVRaceOne Flasher"
+    },
+    {
+      "id": "version",
+      "type": "promptString",
+      "description": "Release version (e.g. v1.0.0)"
+    }
+  ]
+}
