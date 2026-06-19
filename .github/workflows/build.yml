@@ -1,14 +1,14 @@
 name: Build
 
 # Push a tag (v*) → builds the .exe and attaches it to a GitHub Release.
-# Push/PR to main → builds the .exe and uploads it as a CI artifact for testing.
+# Push/PR to master → builds the .exe and uploads it as a CI artifact for testing.
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
 
 permissions:

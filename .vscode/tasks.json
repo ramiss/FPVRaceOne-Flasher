@@ -6,7 +6,7 @@
   "tasks": [
     {
       "label": "Deploy to GitHub",
-      "detail": "Commit all changes and push to main (CI builds the .exe).",
+      "detail": "Commit all changes and push to master (CI builds the .exe).",
       "type": "shell",
       "command": "powershell",
       "args": [

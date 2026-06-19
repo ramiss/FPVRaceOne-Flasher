@@ -1,7 +1,7 @@
 # One-click deploy for the FPVRaceOne Flasher.
 #
-# Stages every change, commits it, and pushes to the `main` branch on GitHub.
-# Pushing to `main` triggers .github/workflows/build.yml, which builds the .exe
+# Stages every change, commits it, and pushes to the `master` branch on GitHub.
+# Pushing to `master` triggers .github/workflows/build.yml, which builds the .exe
 # in the cloud and uploads it as a downloadable artifact.
 #
 # Normally run via the VSCode task "Deploy to GitHub" (Ctrl+Shift+B), but you
@@ -17,12 +17,13 @@ param(
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
-# CI only builds on `main`; rename the default branch on first run if needed.
+# CI builds on `master`; if we're on any other branch, switch to master so the
+# deploy always lands there.
 $branch = (git rev-parse --abbrev-ref HEAD).Trim()
-if ($branch -eq 'master') {
-    Write-Host "Renaming branch 'master' -> 'main' (CI builds on main)..." -ForegroundColor Yellow
-    git branch -M main
-    $branch = 'main'
+if ($branch -ne 'master') {
+    Write-Host "Switching from '$branch' to 'master' (CI builds on master)..." -ForegroundColor Yellow
+    git checkout master
+    $branch = 'master'
 }
 
 Write-Host "Staging changes..." -ForegroundColor Cyan
